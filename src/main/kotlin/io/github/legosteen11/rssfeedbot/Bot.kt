@@ -1,5 +1,6 @@
 package io.github.legosteen11.rssfeedbot
 
+import com.sun.syndication.feed.synd.SyndFeed
 import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.launch
@@ -59,13 +60,19 @@ object Bot : TelegramLongPollingBot() {
                             val resource = Feed.parseResource(input)
                             val type = Feed.parseType(input)
 
-                            if(Feed.parsable(resource, type)) {
-                                // feed is parsable
+                            // get existing feed if it exists
+                            val existingFeed = transaction { Feed.find { Feeds.resource eq resource }.toList().firstOrNull() }
 
-                                // get existing feed if it exists
-                                val existingFeed = transaction { Feed.find { Feeds.resource eq resource }.toList().firstOrNull() }
+                            if(existingFeed == null) {
+                                if(type == Feed.FeedType.SUBREDDIT) {
+                                    user.sendMessage("Waiting twenty seconds before subscribing to the next feed ($input) because it is a subreddit and we don't want to spam Reddit.")
 
-                                val feed = if (existingFeed == null) {
+                                    Thread.sleep(200000) // wait so that there won't be errors because of too many requests
+                                }
+
+                                try {
+                                    val syndFeed = Feed.getFeed(Feed.getUrl(resource, type))
+
                                     // create new feed because it doesn't exist yet
                                     val newFeed = transaction {
                                         Feed.new {
@@ -74,18 +81,22 @@ object Bot : TelegramLongPollingBot() {
                                         }
                                     }
 
-                                    newFeed.getAndCreateNewPosts() // ignore the new posts as they will otherwise cause a lot of spam
+                                    newFeed.getAndCreateNewPosts(syndFeed) // ignore the new posts as they will otherwise cause a lot of spam
 
-                                    newFeed
-                                } else
-                                    existingFeed
+                                    user.subscribe(newFeed) // subscribe user to feed
 
-                                user.subscribe(feed) // subscribe user to feed
-
-                                successList.add(feed) // add feed to successful subscriptions
+                                    user.sendMessage("Subscribed to ${newFeed.getNiceResource()}.")
+                                } catch(e: Exception) {
+                                    user.sendMessage("Could not subscribe to $input.")
+                                }
                             } else {
-                                failedList.add(input)
+                                user.subscribe(existingFeed) // subscribe user to feed
+
+                                user.sendMessage("Subscribed to ${existingFeed.getNiceResource()}.")
                             }
+
+
+
                         }
 
                         if(successList.isEmpty())

@@ -167,6 +167,8 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
          */
         @Throws(IllegalArgumentException::class, FeedException::class, IOException::class, ClientProtocolException::class)
         suspend fun getFeed(url: String): SyndFeed {
+            // TODO: Work with an queue so that there won't be any problems with requesting too many feeds.
+
             // from https://github.com/rometools/rome/issues/276
             HttpClients.createMinimal().use { client ->
                 val request = HttpGet(url)
@@ -235,8 +237,8 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
      * @throws ClientProtocolException If there was an HTTP protocol error
      */
     @Throws(IllegalArgumentException::class, FeedException::class, IOException::class, ClientProtocolException::class)
-    suspend fun getAndCreateNewPosts(): Array<Post> {
-        val syndFeed = getFeed(getUrl(resource, type))
+    suspend fun getAndCreateNewPosts(feed: SyndFeed? = null): Array<Post> {
+        val syndFeed = feed ?: getFeed(getUrl(resource, type))
 
         val posts = arrayListOf<Post>()
 
@@ -257,7 +259,7 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
                 posts.add( // add post to posts
                         transaction {
                             Post.new {
-                                feed = this@Feed
+                                this.feed = this@Feed
                                 title = postTitle
                                 url = postUrl
                                 publishedDate = postPublishedDate?.toDateTime() ?: DateTime.now()
