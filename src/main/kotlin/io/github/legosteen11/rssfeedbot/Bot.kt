@@ -4,6 +4,8 @@ import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.launch
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.telegram.telegrambots.api.methods.AnswerCallbackQuery
+import org.telegram.telegrambots.api.methods.send.SendChatAction
 import org.telegram.telegrambots.api.methods.send.SendMessage
 import org.telegram.telegrambots.api.methods.updatingmessages.DeleteMessage
 import org.telegram.telegrambots.api.methods.updatingmessages.EditMessageReplyMarkup
@@ -25,7 +27,7 @@ object Bot : TelegramLongPollingBot() {
 
             if(command.isNullOrBlank()) {
                 launch(CommonPool) {
-                    execute(SendMessage(
+                    execute(SendChatAction(
                             chatId,
                             "Please provide a command"
                     ))
@@ -110,7 +112,7 @@ object Bot : TelegramLongPollingBot() {
                 }
                 "format" -> {
                     launch(CommonPool) {
-                        execute(SendMessage(
+                        execute(SendChatAction(
                                 chatId,
                                 "This function is not yet available."
                         ))
@@ -122,6 +124,7 @@ object Bot : TelegramLongPollingBot() {
         if(update.hasCallbackQuery()) {
             val chatId = update.callbackQuery.message.chatId
             val messageId = update.callbackQuery.message.messageId
+            val callbackQueryId = update.callbackQuery.id
 
             val loadingUser = async(CommonPool) { User.getOrCreate(chatId) }
 
@@ -151,7 +154,9 @@ object Bot : TelegramLongPollingBot() {
                     // unsubscribe user from feed
                     user.unsubscribe(feed)
 
-                    user.sendMessage("Unsubscribed from ${feed.getNiceResource()}")
+                    execute(AnswerCallbackQuery().setCallbackQueryId(callbackQueryId).setText("Unsubscribed from ${feed.getNiceResource()}"))
+
+                    //user.sendMessage("Unsubscribed from ${feed.getNiceResource()}")
 
                     // change inline keyboard
                     execute(EditMessageReplyMarkup().setChatId(chatId).setMessageId(messageId).setReplyMarkup(InlineKeyboardMarkup().setKeyboard(getUnsubscribeReplyMarkup(user))))

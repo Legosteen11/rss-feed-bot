@@ -5,4 +5,4 @@ import java.util.*
 
 fun Date.toDateTime() = DateTime(this.time)
 
-fun DateTime.toDateTimeString(): String = "${year()}-${monthOfYear()}-${dayOfMonth()} ${hourOfDay()}:${minuteOfHour()}"
+fun DateTime.toDateTimeString(): String = "${dayOfWeek().asShortText} ${dayOfMonth().asString} ${monthOfYear().asShortText} ${year().asString} at ${hourOfDay().asString}:${minuteOfHour().asString}"

@@ -8,10 +8,12 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.StdOutSqlLogger
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.slf4j.LoggerFactory
 import org.telegram.telegrambots.ApiContextInitializer
 import org.telegram.telegrambots.TelegramBotsApi
 import java.io.IOException
-import java.util.logging.Logger
+
+val logger = LoggerFactory.getLogger("rss-feed-bot")!!
 
 fun main(args: Array<String>) {
     // connect to the database
@@ -33,11 +35,11 @@ fun main(args: Array<String>) {
     }
 
     launch(CommonPool) {
-        println(Feed.getFeed(Feed.getUrl(feed.resource, feed.type)))
+        logger.info(Feed.getFeed(Feed.getUrl(feed.resource, feed.type)))
 
         feed.getAndCreateNewPosts().let {
             it.forEach {
-                println("Title: ${it.title}, url: ${it.url} @ ${it.publishedDate}")
+                logger.info("Title: ${it.title}, url: ${it.url} @ ${it.publishedDate}")
             }
         }
     }
@@ -51,39 +53,48 @@ fun main(args: Array<String>) {
 
     launch(CommonPool) {
         while (true) {
-            println("sending new posts")
+            logger.info("sending new posts")
 
             // update the feed
             notifyUsersOfNewPosts()
-            println("sent new posts")
+            logger.info("sent new posts")
 
-            Thread.sleep(600000) // update every 600.000 seconds (10 minutes)
+            Thread.sleep(REFRESH_TIME)
         }
     }
 }
+
+val WAIT_BETWEEN_POSTS_TIME = 20000L // wait 20 secs before fetching the next feed
+val REFRESH_TIME = 600000L // update every 600.000 seconds (10 minutes)
 
 suspend fun notifyUsersOfNewPosts() {
     val feeds = transaction { Feed.all().toList() }
 
     feeds.forEach { feed ->
         try {
+            logger.info("Loading feed ${feed.getNiceResource()}")
+
             val newPosts = feed.getAndCreateNewPosts()
 
             val subscribers = feed.getSubscribers()
 
             subscribers.forEach { user ->
                 newPosts.forEach { post ->
-                    user.notifyOfPost(post)
+                    user.notifyOfPost(post, feed)
                 }
             }
+
+            logger.info("Done loading feed ${feed.getNiceResource()}")
+
+            Thread.sleep(WAIT_BETWEEN_POSTS_TIME)
         } catch (e: IOException) {
-            println("IO Exception while trying to fetch ${feed.getNiceResource()}")
+            logger.error("IO Exception while trying to fetch ${feed.getNiceResource()}")
         } catch (e: IllegalArgumentException) {
-            println("Feed type or url was not understood for ${feed.getNiceResource()}")
+            logger.error("Feed type or url was not understood for ${feed.getNiceResource()}")
         } catch (e: FeedException) {
-            println("The feed ${feed.getNiceResource()} could not be parsed")
+            logger.error("The feed ${feed.getNiceResource()} could not be parsed")
         } catch (e: ClientProtocolException) {
-            println("There was an HTTP error while trying to fetch ${feed.getNiceResource()}")
+            logger.error("There was an HTTP error while trying to fetch ${feed.getNiceResource()}")
         }
 
     }

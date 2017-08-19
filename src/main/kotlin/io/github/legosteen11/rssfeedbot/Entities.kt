@@ -7,19 +7,17 @@ import com.sun.syndication.io.SyndFeedInput
 import com.sun.syndication.io.XmlReader
 import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.launch
-import kotlinx.html.a
-import kotlinx.html.b
-import kotlinx.html.br
-import kotlinx.html.p
-import kotlinx.html.stream.createHTML
 import org.apache.commons.io.IOUtils
 import org.apache.http.client.ClientProtocolException
-import org.jetbrains.exposed.dao.*
-import org.joda.time.DateTime
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.impl.client.HttpClients
+import org.jetbrains.exposed.dao.EntityID
+import org.jetbrains.exposed.dao.IntEntity
+import org.jetbrains.exposed.dao.IntEntityClass
+import org.jetbrains.exposed.dao.IntIdTable
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.joda.time.DateTime
 import org.telegram.telegrambots.api.methods.send.SendMessage
 import java.io.IOException
 import java.nio.charset.Charset
@@ -110,17 +108,6 @@ class User(id: EntityID<Int>): IntEntity(id) {
     }
 
     /**
-     * Send a message to the user that will be run in the CommonPool (Kotlin coroutine)
-     *
-     * @param message The message to send to the user
-     */
-    fun sendMessageAsync(message: String) {
-        launch(CommonPool) {
-            sendMessage(message)
-        }
-    }
-
-    /**
      * Send an HTML enabled message
      *
      * @param message The message to send
@@ -137,11 +124,12 @@ class User(id: EntityID<Int>): IntEntity(id) {
      *
      * @param post The post to notify the user of
      */
-    suspend fun notifyOfPost(post: Post) {
-        sendMessage(
+    suspend fun notifyOfPost(post: Post, feed: Feed) {
+        sendHtmlMessage(
             """
-                <b>${post.title}<b>
+                <b>${post.title}</b>
                 Published at: ${post.publishedDate.toDateTimeString()}
+                In feed ${feed.getNiceResource()}
                 <a href="${post.url}">View post</a>
             """.trimIndent()
         )
@@ -182,6 +170,7 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
             // from https://github.com/rometools/rome/issues/276
             HttpClients.createMinimal().use { client ->
                 val request = HttpGet(url)
+                request.addHeader("User-Agent", "telegram:io.github.legosteen11.rssfeedbot:v1.0.0 (by /u/LEGOSTEEN11)")
                 client.execute(request).use { response ->
                     response.entity.content.use { stream ->
                         //println(IOUtils.toString(stream, Charset.defaultCharset()))

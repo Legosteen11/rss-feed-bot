@@ -29,6 +29,9 @@ dependencies {
     // https://mvnrepository.com/artifact/org.slf4j/slf4j-api
     compile group: 'org.slf4j', name: 'slf4j-api', version: '1.7.25'
 
+    // slf4j log4j
+    compile group: 'org.slf4j', name: 'slf4j-log4j12', version: '1.7.25'
+
     // html
     compile "org.jetbrains.kotlinx:kotlinx-html-jvm:0.6.3"
 
