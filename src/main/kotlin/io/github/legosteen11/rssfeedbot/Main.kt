@@ -16,8 +16,12 @@ import java.io.IOException
 val logger = LoggerFactory.getLogger("rss-feed-bot")!!
 
 fun main(args: Array<String>) {
+    val username = args.getOrNull(0) ?: "development"
+    val password = args.getOrNull(1) ?: "development"
+    val database = args.getOrNull(2) ?: "development"
+
     // connect to the database
-    Database.connect("jdbc:mysql://localhost/development?useUnicode=true&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=UTC&nullNamePatternMatchesAll=true", driver = "com.mysql.cj.jdbc.Driver", user = "development", password = "development")
+    Database.connect("jdbc:mysql://localhost/$database?useUnicode=true&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=UTC&nullNamePatternMatchesAll=true", driver = "com.mysql.cj.jdbc.Driver", user = username, password = password)
 
     // create the tables
     transaction {
