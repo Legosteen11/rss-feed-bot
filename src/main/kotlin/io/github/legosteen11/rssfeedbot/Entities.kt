@@ -5,8 +5,6 @@ import com.sun.syndication.feed.synd.SyndFeed
 import com.sun.syndication.io.FeedException
 import com.sun.syndication.io.SyndFeedInput
 import com.sun.syndication.io.XmlReader
-import kotlinx.coroutines.experimental.CommonPool
-import kotlinx.coroutines.experimental.launch
 import org.apache.commons.io.IOUtils
 import org.apache.http.client.ClientProtocolException
 import org.apache.http.client.methods.HttpGet
@@ -66,6 +64,12 @@ class User(id: EntityID<Int>): IntEntity(id) {
      * @param feed The feed to subscribe the user to
      */
     suspend fun subscribe(feed: Feed) {
+        val subscription = transaction { Subscription.find { Subscriptions.feed.eq(feed.id) and Subscriptions.user.eq(id) }.toList().firstOrNull() }
+
+        if(subscription != null)
+            return
+
+        // create new subscription
         transaction {
             Subscription.new {
                 this.feed = feed
@@ -167,8 +171,6 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
          */
         @Throws(IllegalArgumentException::class, FeedException::class, IOException::class, ClientProtocolException::class)
         suspend fun getFeed(url: String): SyndFeed {
-            // TODO: Work with an queue so that there won't be any problems with requesting too many feeds.
-
             // from https://github.com/rometools/rome/issues/276
             HttpClients.createMinimal().use { client ->
                 val request = HttpGet(url)
@@ -285,6 +287,17 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
      * @return The users that are subscribed to this feed.
      */
     suspend fun getSubscribers(): Array<User> = transaction { Subscription.find { Subscriptions.feed eq id }.toList().map { it.user } }.toTypedArray()
+
+    suspend fun notifySubscribersOfNewPosts(feed: SyndFeed) {
+        val users = getSubscribers()
+        val posts = getAndCreateNewPosts(feed)
+
+        posts.forEach { post ->
+            users.forEach { user ->
+                user.notifyOfPost(post, this)
+            }
+        }
+    }
 
     enum class FeedType {
         SUBREDDIT,

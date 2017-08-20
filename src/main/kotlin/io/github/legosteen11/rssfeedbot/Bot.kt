@@ -1,6 +1,5 @@
 package io.github.legosteen11.rssfeedbot
 
-import com.sun.syndication.feed.synd.SyndFeed
 import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.launch
@@ -53,9 +52,6 @@ object Bot : TelegramLongPollingBot() {
                     launch(CommonPool) {
                         val user = loadingUser.await()
 
-                        val successList = arrayListOf<Feed>()
-                        val failedList = arrayListOf<String>()
-
                         parameters.forEach { input ->
                             val resource = Feed.parseResource(input)
                             val type = Feed.parseType(input)
@@ -64,47 +60,33 @@ object Bot : TelegramLongPollingBot() {
                             val existingFeed = transaction { Feed.find { Feeds.resource eq resource }.toList().firstOrNull() }
 
                             if(existingFeed == null) {
-                                if(type == Feed.FeedType.SUBREDDIT) {
-                                    user.sendMessage("Waiting twenty seconds before subscribing to the next feed ($input) because it is a subreddit and we don't want to spam Reddit.")
-
-                                    Thread.sleep(200000) // wait so that there won't be errors because of too many requests
-                                }
-
-                                try {
-                                    val syndFeed = Feed.getFeed(Feed.getUrl(resource, type))
-
-                                    // create new feed because it doesn't exist yet
-                                    val newFeed = transaction {
-                                        Feed.new {
-                                            this.resource = resource
-                                            this.type = type
+                                RSSQueue.addToQueue(Feed.getUrl(resource, type), true) { status, syndFeed -> // add to queue (with priority)
+                                    if(status == RSSQueue.FetchStatus.SUCCESS) { // feed was fetched successfully
+                                        // create new feed because it doesn't exist yet
+                                        val newFeed = transaction {
+                                            Feed.new {
+                                                this.resource = resource
+                                                this.type = type
+                                            }
                                         }
+
+                                        newFeed.getAndCreateNewPosts(syndFeed) // ignore the new posts as they will otherwise cause a lot of spam
+
+                                        RSSQueue.addFeedToQueue(newFeed)
+
+                                        user.subscribe(newFeed) // subscribe user to feed
+
+                                        user.sendMessage("Subscribed to ${newFeed.getNiceResource()}.")
+                                    } else { // could not fetch feed
+                                        user.sendMessage("Could not subscribe to $input.")
                                     }
-
-                                    newFeed.getAndCreateNewPosts(syndFeed) // ignore the new posts as they will otherwise cause a lot of spam
-
-                                    user.subscribe(newFeed) // subscribe user to feed
-
-                                    user.sendMessage("Subscribed to ${newFeed.getNiceResource()}.")
-                                } catch(e: Exception) {
-                                    user.sendMessage("Could not subscribe to $input.")
                                 }
                             } else {
                                 user.subscribe(existingFeed) // subscribe user to feed
 
                                 user.sendMessage("Subscribed to ${existingFeed.getNiceResource()}.")
                             }
-
-
-
                         }
-
-                        if(successList.isEmpty())
-                            user.sendMessage("Could not subscribe to feed(s).")
-                        else
-                            user.sendMessage("Subscribed to: ${successList.joinToString { it.getNiceResource() }}" +
-                                    if (failedList.isNotEmpty()) ", but failed to subscribe to ${failedList.joinToString()}." else "." // message when failed to subscribe to some feeds
-                            )
                     }
                 }
                 "unsubscribe" -> {

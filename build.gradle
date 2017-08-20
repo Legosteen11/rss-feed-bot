@@ -1,5 +1,5 @@
 group 'io.github.legosteen11'
-version '1.1.2-SNAPSHOT'
+version '1.2.0'
 
 buildscript {
     ext.kotlin_version = '1.1.4'
@@ -25,6 +25,9 @@ repositories {
 
 dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib-jre8:$kotlin_version"
+
+    // guava
+    compile 'com.google.guava:guava:23.0'
 
     // https://mvnrepository.com/artifact/org.slf4j/slf4j-api
     compile group: 'org.slf4j', name: 'slf4j-api', version: '1.7.25'
