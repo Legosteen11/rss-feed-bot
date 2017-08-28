@@ -11,6 +11,7 @@ import org.telegram.telegrambots.TelegramBotsApi
 val logger = LoggerFactory.getLogger("rss-feed-bot")!!
 
 fun main(args: Array<String>) {
+    Config.test = args.isEmpty()
     val username = args.getOrNull(0) ?: "development"
     val password = args.getOrNull(1) ?: "development"
     val database = args.getOrNull(2) ?: "development"

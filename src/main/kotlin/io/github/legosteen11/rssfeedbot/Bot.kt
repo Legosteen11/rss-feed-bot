@@ -13,6 +13,7 @@ import org.telegram.telegrambots.api.objects.Update
 import org.telegram.telegrambots.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.api.objects.replykeyboard.buttons.InlineKeyboardButton
 import org.telegram.telegrambots.bots.TelegramLongPollingBot
+import org.telegram.telegrambots.exceptions.TelegramApiException
 
 object Bot : TelegramLongPollingBot() {
     override fun getBotToken(): String = Config.bot_token
@@ -51,6 +52,12 @@ object Bot : TelegramLongPollingBot() {
 
                     launch(CommonPool) {
                         val user = loadingUser.await()
+
+                        if(parameters.isEmpty()) {
+                            user.sendMessage("You didn't give any feeds to subscribe to.")
+
+                            return@launch
+                        }
 
                         parameters.forEach { input ->
                             val resource = Feed.parseResource(input)
@@ -105,11 +112,56 @@ object Bot : TelegramLongPollingBot() {
                 }
                 "format" -> {
                     launch(CommonPool) {
-                        execute(SendChatAction(
-                                chatId,
-                                "This function is not yet available."
-                        ))
+                        val user = loadingUser.await()
+
+                        val newMarkup = parameters.joinToString(" ")
+
+                        if(newMarkup.isBlank()) {
+                            user.sendMessage("No formatting was provided... Check the Telegram docs to see what's possible: https://core.telegram.org/bots/api#formatting-options.\n" +
+                                    "The bot also replaces these values: {title}, {url}, {date}, {feed}, {author}, {categories} with the values from the post. You can also use \\n to go to the next line. If you set the formatting to {pic} you will only see the picture. To set the formatting to the default use /format default")
+
+                            return@launch
+                        }
+
+                        if(newMarkup == "default") {
+                            user.markup = null
+
+                            user.sendMessage("Set markup to default!")
+
+                            return@launch
+                        }
+
+                        val testFeed = user.getSubscriptions().lastOrNull()
+                        if(testFeed == null) {
+                            user.sendMessage("Please subscribe to a feed first. We cannot test whether your markup is valid or not if you are not subscribed to a feed.")
+
+                            return@launch
+                        }
+
+                        val testPost = transaction { Post.find { Posts.feed eq testFeed.id }.lastOrNull() }
+
+                        if(testPost == null) {
+                            user.sendMessage("The last feed (${testFeed.getNiceResource()} that you subscribed to doesn't have any posts so we cannot test whether your formatting is valid or not.")
+
+                            return@launch
+                        }
+
+                        try {
+                            user.notifyOfPost(testPost, testFeed, newMarkup)
+
+                            transaction { User[user.id].markup = newMarkup }
+
+                            user.sendMessage("Set formatting options.")
+                        } catch (e: TelegramApiException) {
+                            user.sendMessage("Unfortunately the formatting you provided is not parsable by Telegram. Check the docs to see what's possible: https://core.telegram.org/bots/api#formatting-options.")
+                        }
                     }
+                }
+                "forward" -> {
+                    execute(SendMessage(
+                            chatId,
+                            "Sorry, but this function is not yet available."
+                    ))
                 }
             }
         }

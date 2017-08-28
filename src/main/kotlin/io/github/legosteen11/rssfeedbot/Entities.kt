@@ -1,5 +1,7 @@
 package io.github.legosteen11.rssfeedbot
 
+import com.sun.syndication.feed.synd.SyndCategoryImpl
+import com.sun.syndication.feed.synd.SyndContentImpl
 import com.sun.syndication.feed.synd.SyndEntryImpl
 import com.sun.syndication.feed.synd.SyndFeed
 import com.sun.syndication.io.FeedException
@@ -17,6 +19,8 @@ import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.joda.time.DateTime
 import org.telegram.telegrambots.api.methods.send.SendMessage
+import org.telegram.telegrambots.api.methods.send.SendPhoto
+import org.telegram.telegrambots.exceptions.TelegramApiException
 import java.io.IOException
 import java.nio.charset.Charset
 import java.util.*
@@ -24,6 +28,7 @@ import java.util.*
 
 object Users: IntIdTable() {
     val chatId = long("chat_id").uniqueIndex()
+    val markup = text("markup").nullable()
 }
 
 object Feeds: IntIdTable() {
@@ -41,8 +46,9 @@ object Posts: IntIdTable() {
     val title = text("title")
     val url = varchar("url", 191)
     val publishedDate = datetime("publish_date").default(DateTime.now())
-
-    // TODO: Store more data like author, source, hashtags etc.
+    val categories = text("categories").nullable() // array of strings split by ;
+    val author = varchar("author", 191).nullable()
+    val pictureUrl = varchar("picture_url", 191).nullable() // url for picture (if exists in content string)
 }
 
 class User(id: EntityID<Int>): IntEntity(id) {
@@ -57,6 +63,7 @@ class User(id: EntityID<Int>): IntEntity(id) {
     }
 
     var chatId by Users.chatId
+    var markup by Users.markup
 
     /**
      * Subscribe a user to a feed
@@ -128,37 +135,46 @@ class User(id: EntityID<Int>): IntEntity(id) {
      *
      * @param post The post to notify the user of
      */
-    suspend fun notifyOfPost(post: Post, feed: Feed) {
-        sendHtmlMessage(
+    suspend fun notifyOfPost(post: Post, feed: Feed, customMarkup: String? = this.markup) {
+        val markup = customMarkup ?:
             """
-                <b>${post.title}</b>
-                Published at: ${post.publishedDate.toDateTimeString()}
-                In feed ${feed.getNiceResource()}
-                <a href="${post.url}">View post</a>
+                <b>{title}</b>
+                Published at: {date}
+                In feed {feed}
+                <a href="{url}">View post</a>
             """.trimIndent()
+
+        val text = markup
+                .replace("""\n""", "\n")
+                .replace("{title}", post.title)
+                .replace("{url}", post.url)
+                .replace("{date}", post.publishedDate.toDateTimeString())
+                .replace("{feed}", feed.getNiceResource())
+                .replace("{author}", post.author ?: "someone at ${feed.getNiceResource()}")
+                .replace("{categories}", (post.categories ?: "").split(";").joinToString { category ->
+                    "${if(!category.contains(" ")) "#" else ""}$category"
+                })
+
+        if(markup.contains("{pic}")) {
+            if(post.pictureUrl == null)
+                return
+
+            try {
+                Bot.sendPhoto(SendPhoto().setChatId(chatId).setPhoto(post.pictureUrl).setCaption(markup.replace("{pic}", "")))
+            } catch (e: TelegramApiException) {
+                logger.info("Unable to send photo with url ${post.pictureUrl} in feed ${feed.getNiceResource()}")
+            }
+            return
+        }
+
+        sendHtmlMessage(
+            text
         )
     }
 }
 
 class Feed(id: EntityID<Int>): IntEntity(id) {
     companion object: IntEntityClass<Feed>(Feeds) {
-        /**
-         * Checks whether this resource asnd type is parsable
-         *
-         * @param resource The resource string. This could be an url to a RSS feed or a Subreddit.
-         * @param type The feed type
-         *
-         * @return True if parsable, false if not parsable
-         */
-        suspend fun parsable(resource: String, type: FeedType): Boolean {
-            try {
-                getFeed(getUrl(resource, type))
-            } catch (e: Exception) {
-                return false
-            }
-            return true
-        }
-
         /**
          * Fetch the feed from the resource and return a SyndFeed object
          *
@@ -244,12 +260,12 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
 
         val posts = arrayListOf<Post>()
 
-        syndFeed.entries.forEach {
-            it as SyndEntryImpl // cast to synd (RSS) feed object
+        syndFeed.entries.forEach { entry ->
+            entry as SyndEntryImpl // cast to synd (RSS) feed object
 
-            val postTitle = it.title
-            val postUrl = it.link
-            val postPublishedDate: Date? = it.publishedDate
+            val postTitle = entry.title
+            val postUrl = entry.link
+            val postPublishedDate: Date? = entry.publishedDate
 
             val exists = transaction { Post.find { // check whether the post already exists in the database
                 Posts.url.eq(postUrl) and
@@ -265,6 +281,9 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
                                 title = postTitle
                                 url = postUrl
                                 publishedDate = postPublishedDate?.toDateTime() ?: DateTime.now()
+                                author = entry.author
+                                categories = entry.categories.joinToString(";") { (it as SyndCategoryImpl).name }
+                                pictureUrl = findPictureLinkInString(entry.contents.joinToString("\n"))
                             }
                         }
                 )
@@ -319,6 +338,7 @@ class Post(id: EntityID<Int>): IntEntity(id) {
     var title by Posts.title
     var url by Posts.url
     var publishedDate by Posts.publishedDate
-
-    // TODO: Add some sort of template engine to let users make templates
+    var categories by Posts.categories
+    var author by Posts.author
+    var pictureUrl by Posts.pictureUrl
 }

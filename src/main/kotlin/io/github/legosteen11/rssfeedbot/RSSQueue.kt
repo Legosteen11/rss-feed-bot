@@ -83,7 +83,10 @@ object RSSQueue {
 
     private class QueueObject(val url: String, val callback: suspend (FetchStatus, SyndFeed?) -> Unit) {
         fun upInQueue() {
-            queue.add(1, this)
+            // check if the default new index position isn't larger than the current queue size because else #add will throw an exception.
+            val newIndex = if(DEFAULT_NEW_INDEX > queue.size) queue.size else DEFAULT_NEW_INDEX
+
+            queue.add(newIndex, this)
         }
 
         suspend fun execute() {
@@ -119,6 +122,7 @@ object RSSQueue {
 
         private companion object {
             val MINIMUM_TIME_IN_BETWEEN = 20000L // 20 seconds
+            val DEFAULT_NEW_INDEX = 1
 
             val lastFetchTimes = hashMapOf<String, Stopwatch>()
 
