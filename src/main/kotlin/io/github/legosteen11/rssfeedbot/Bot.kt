@@ -195,12 +195,11 @@ object Bot : TelegramLongPollingBot() {
                         }
                         // user is admin
 
-                        user.sendMessage("""
-                            Users: ${User.count()}
-                            Feeds: ${Feed.count()}
-                            Subscriptions: ${Subscription.count()}
-                            Posts: ${Post.count()}
-                            """.trimIndent())
+                        user.sendMessage("Users: ${transaction { User.count() } }\n" +
+                            "Feeds: ${transaction {Feed.count()} }\n" +
+                            "Subscriptions: ${transaction {Subscription.count()} }\n" +
+                            "Posts: ${transaction {Post.count()} }"
+                        )
                     }
                 }
             }
