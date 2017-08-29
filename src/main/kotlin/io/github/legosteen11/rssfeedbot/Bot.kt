@@ -124,7 +124,7 @@ object Bot : TelegramLongPollingBot() {
                         }
 
                         if(newMarkup == "default") {
-                            user.markup = null
+                            transaction { User.findById(user.id)?.markup = null }
 
                             user.sendMessage("Set markup to default!")
 

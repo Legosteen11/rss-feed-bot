@@ -174,9 +174,13 @@ class User(id: EntityID<Int>): IntEntity(id) {
             return
         }
 
-        sendHtmlMessage(
-            text
-        )
+        try {
+            sendHtmlMessage(
+                    text
+            )
+        } catch (e: Exception) {
+            logger.error("Exception while trying to send a post!", e)
+        }
     }
 }
 
