@@ -59,6 +59,8 @@ object Bot : TelegramLongPollingBot() {
                             return@launch
                         }
 
+                        user.sendMessage("Started subscribing to your feeds. This may take a few minutes due to the way feeds are handled. You will start receiving messages confirming your subscriptions soon.")
+
                         parameters.forEach { input ->
                             val resource = Feed.parseResource(input)
                             val type = Feed.parseType(input)
@@ -117,7 +119,7 @@ object Bot : TelegramLongPollingBot() {
                         val newMarkup = parameters.joinToString(" ")
 
                         if(newMarkup.isBlank()) {
-                            user.sendMessage("No formatting was provided... Check the Telegram docs to see what's possible: https://core.telegram.org/bots/api#formatting-options.\n" +
+                            user.sendMessage("No formatting was provided... Check the Telegram docs to see what's possible: https://core.telegram.org/bots/api#formatting-options (html styling).\n" +
                                     "The bot also replaces these values: {title}, {url}, {date}, {feed}, {author}, {categories} with the values from the post. You can also use \\n to go to the next line. If you set the formatting to {pic} you will only see the picture. To set the formatting to the default use /format default")
 
                             return@launch
@@ -182,6 +184,23 @@ object Bot : TelegramLongPollingBot() {
                                 )
                             }
                         }
+                    }
+                }
+                "stats" -> {
+                    launch(CommonPool) {
+                        val user = loadingUser.await()
+                        if(!user.isAdmin()) {
+                            user.sendMessage("You need to be admin to use this feature.")
+                            return@launch
+                        }
+                        // user is admin
+
+                        user.sendMessage("""
+                            Users: ${User.count()}
+                            Feeds: ${Feed.count()}
+                            Subscriptions: ${Subscription.count()}
+                            Posts: ${Post.count()}
+                            """.trimIndent())
                     }
                 }
             }
