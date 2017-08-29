@@ -167,7 +167,7 @@ class User(id: EntityID<Int>): IntEntity(id) {
                 return
 
             try {
-                Bot.sendPhoto(SendPhoto().setChatId(chatId).setPhoto(post.pictureUrl).setCaption(markup.replace("{pic}", "")))
+                Bot.sendPhoto(SendPhoto().setChatId(chatId).setPhoto(post.pictureUrl).setCaption(text.replace("{pic}", "")))
             } catch (e: TelegramApiException) {
                 logger.info("Unable to send photo with url ${post.pictureUrl} in feed ${feed.getNiceResource()}")
             }
@@ -321,6 +321,13 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
     suspend fun notifySubscribersOfNewPosts(feed: SyndFeed) {
         val users = getSubscribers()
         val posts = getAndCreateNewPosts(feed)
+
+        if(isMuted()) {
+            // do not send posts because the bot is muted.
+            logger.info("Ignoring posts for feed ${getNiceResource()}")
+
+            return
+        }
 
         posts.forEach { post ->
             users.forEach { user ->
