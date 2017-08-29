@@ -160,8 +160,29 @@ object Bot : TelegramLongPollingBot() {
                 "forward" -> {
                     execute(SendMessage(
                             chatId,
-                            "Sorry, but this function is not yet available."
+                            "I'm sorry, but this function is not yet available."
                     ))
+                }
+                "notify_users" -> {
+                    launch(CommonPool) {
+                        val user = loadingUser.await()
+                        val message = parameters.joinToString(" ")
+
+                        if(!user.isAdmin()) {
+                            user.sendMessage("You need to be admin to use this feature.")
+                            return@launch
+                        }
+                        // user is admin.
+
+                        // Send a message to all users (not channels) that do not have custom markup enabled
+                        transaction { User.all().toList() }.forEach {
+                            if (it.markup == null) {
+                                it.sendHtmlMessage(
+                                        message
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

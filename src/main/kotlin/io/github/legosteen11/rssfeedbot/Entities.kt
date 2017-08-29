@@ -66,6 +66,13 @@ class User(id: EntityID<Int>): IntEntity(id) {
     var markup by Users.markup
 
     /**
+     * Check whether the user is an admin or not
+     *
+     * @return Returns true if the user is an admin.
+     */
+    fun isAdmin() = Config.admin_ids.contains(chatId)
+
+    /**
      * Subscribe a user to a feed
      *
      * @param feed The feed to subscribe the user to
