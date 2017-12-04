@@ -5,6 +5,7 @@ import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.launch
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.telegram.telegrambots.api.methods.AnswerCallbackQuery
+import org.telegram.telegrambots.api.methods.groupadministration.GetChat
 import org.telegram.telegrambots.api.methods.send.SendChatAction
 import org.telegram.telegrambots.api.methods.send.SendMessage
 import org.telegram.telegrambots.api.methods.updatingmessages.DeleteMessage
@@ -159,11 +160,181 @@ object Bot : TelegramLongPollingBot() {
                         }
                     }
                 }
-                "forward" -> {
-                    execute(SendMessage(
-                            chatId,
-                            "I'm sorry, but this function is not yet available."
-                    ))
+                "addchannel" -> {
+                    launch(CommonPool) {
+                        val user = loadingUser.await()
+                        val channelName = parameters.firstOrNull()
+
+                        if(channelName == null) {
+                            user.sendMessage("Channel name/id is empty.")
+
+                            return@launch
+                        }
+
+                        val existingChannel = transaction {
+                            Channel.find {
+                                Channels.channelId eq channelName
+                            }.firstOrNull()
+                        }
+
+                        if(existingChannel != null) {
+                            user.sendMessage("This channel was already added.")
+
+                            return@launch
+                        }
+
+                        try {
+                            Bot.execute(SendMessage(channelName, "RSS-post-bot successfully added to channel."))
+                        } catch (e: TelegramApiException) {
+                            user.sendMessage("Sending message to channel failed... Do not forget to add the @ to the channel name!")
+
+                            return@launch
+                        }
+
+                        val newChannel = transaction {
+                            Channel.new {
+                                channelId = channelName
+                                this.user = user
+                                markup = null
+                            }
+                        }
+
+                        user.sendMessage("Bot successfully added to your channel, please delete the message that the bot sent.")
+                    }
+                }
+                "channelsubscribe" -> {
+                    launch(CommonPool) {
+                        val user = loadingUser.await()
+                        val channelName = parameters.firstOrNull()
+
+                        val channel = transaction {
+                            Channel.find {
+                                Channels.channelId eq channelName
+                            }.firstOrNull()
+                        }
+
+                        if(channel == null) {
+                            user.sendMessage("This channel does not exist.")
+
+                            return@launch
+                        }
+
+                        if(!channel.userIsAdmin(user)) {
+                            user.sendMessage("You do not have sufficient permissions to manage this channel.")
+
+                            return@launch
+                        }
+
+                        if(parameters.isEmpty()) {
+                            user.sendMessage("You didn't give any feeds to subscribe to.")
+
+                            return@launch
+                        }
+
+                        user.sendMessage("Started subscribing to your feeds. This may take a few minutes due to the way feeds are handled. You will start receiving messages confirming your subscriptions soon.")
+
+                        parameters.drop(1).forEach { input ->
+                            val resource = Feed.parseResource(input)
+                            val type = Feed.parseType(input)
+
+                            // get existing feed if it exists
+                            val existingFeed = transaction { Feed.find { Feeds.resource eq resource }.toList().firstOrNull() }
+
+                            if(existingFeed == null) {
+                                RSSQueue.addToQueue(Feed.getUrl(resource, type), true) { status, syndFeed -> // add to queue (with priority)
+                                    if(status == RSSQueue.FetchStatus.SUCCESS) { // feed was fetched successfully
+                                        // create new feed because it doesn't exist yet
+                                        val newFeed = transaction {
+                                            Feed.new {
+                                                this.resource = resource
+                                                this.type = type
+                                            }
+                                        }
+
+                                        newFeed.getAndCreateNewPosts(syndFeed) // ignore the new posts as they will otherwise cause a lot of spam
+
+                                        RSSQueue.addFeedToQueue(newFeed)
+
+                                        channel.subscribe(newFeed) // subscribe user to feed
+
+                                        user.sendMessage("Subscribed to ${newFeed.getNiceResource()}.")
+                                    } else { // could not fetch feed
+                                        user.sendMessage("Could not subscribe to $input.")
+                                    }
+                                }
+                            } else {
+                                channel.subscribe(existingFeed) // subscribe user to feed
+
+                                user.sendMessage("Subscribed to ${existingFeed.getNiceResource()}.")
+                            }
+                        }
+                    }
+                }
+                "channelformat" -> {
+                    launch(CommonPool) {
+                        val user = loadingUser.await()
+                        val channelName = parameters.firstOrNull()
+
+                        val channel = transaction {
+                            Channel.find {
+                                Channels.channelId eq channelName
+                            }.firstOrNull()
+                        }
+
+                        if(channel == null) {
+                            user.sendMessage("This channel does not exist.")
+
+                            return@launch
+                        }
+
+                        if(!channel.userIsAdmin(user)) {
+                            user.sendMessage("You do not have sufficient permissions to manage this channel.")
+
+                            return@launch
+                        }
+
+                        val newMarkup = parameters.drop(1).joinToString(" ")
+
+                        if(newMarkup.isBlank()) {
+                            user.sendMessage("No formatting was provided... Check the Telegram docs to see what's possible: https://core.telegram.org/bots/api#formatting-options (html styling).\n" +
+                                    "The bot also replaces these values: {title}, {url}, {date}, {feed}, {author}, {categories} with the values from the post. You can also use \\n to go to the next line. If you set the formatting to {pic} you will only see the picture. To set the formatting to the default use /format default")
+
+                            return@launch
+                        }
+
+                        if(newMarkup == "default") {
+                            transaction { Channel.findById(user.id)?.markup = null }
+
+                            user.sendMessage("Set markup to default!")
+
+                            return@launch
+                        }
+
+                        val testFeed = channel.getSubscriptions().lastOrNull()
+                        if(testFeed == null) {
+                            user.sendMessage("Please subscribe to a feed first. We cannot test whether your markup is valid or not if you are not subscribed to a feed.")
+
+                            return@launch
+                        }
+
+                        val testPost = transaction { Post.find { Posts.feed eq testFeed.id }.lastOrNull() }
+
+                        if(testPost == null) {
+                            user.sendMessage("The last feed (${testFeed.getNiceResource()} that you subscribed to doesn't have any posts so we cannot test whether your formatting is valid or not.")
+
+                            return@launch
+                        }
+
+                        try {
+                            user.notifyOfPost(testPost, testFeed, newMarkup)
+
+                            transaction { Channel[user.id].markup = newMarkup }
+
+                            user.sendMessage("Set formatting options.")
+                        } catch (e: TelegramApiException) {
+                            user.sendMessage("Unfortunately the formatting you provided is not parsable by Telegram. Check the docs to see what's possible: https://core.telegram.org/bots/api#formatting-options.")
+                        }
+                    }
                 }
                 "notify_users" -> {
                     launch(CommonPool) {

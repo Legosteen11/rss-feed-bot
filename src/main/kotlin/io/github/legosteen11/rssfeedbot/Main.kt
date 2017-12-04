@@ -23,7 +23,7 @@ fun main(args: Array<String>) {
     transaction {
         logger.addLogger(StdOutSqlLogger)
 
-        SchemaUtils.create(Users, Feeds, Subscriptions, Posts)
+        SchemaUtils.create(Users, Feeds, Subscriptions, Posts, Channels, ChannelSubscriptions)
     }
 
     ApiContextInitializer.init()

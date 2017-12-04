@@ -1,7 +1,6 @@
 package io.github.legosteen11.rssfeedbot
 
 import com.sun.syndication.feed.synd.SyndCategoryImpl
-import com.sun.syndication.feed.synd.SyndContentImpl
 import com.sun.syndication.feed.synd.SyndEntryImpl
 import com.sun.syndication.feed.synd.SyndFeed
 import com.sun.syndication.io.FeedException
@@ -49,6 +48,17 @@ object Posts: IntIdTable() {
     val categories = text("categories").nullable() // array of strings split by ;
     val author = varchar("author", 191).nullable()
     val pictureUrl = varchar("picture_url", 191).nullable() // url for picture (if exists in content string)
+}
+
+object Channels : IntIdTable() {
+    val channelId = varchar("channel_id", 191).uniqueIndex()
+    val user = reference("user", Users)
+    val markup = text("markup").nullable()
+}
+
+object ChannelSubscriptions: IntIdTable() {
+    val channel = reference("channel", Channels)
+    val feed = reference("feed", Feeds)
 }
 
 class User(id: EntityID<Int>): IntEntity(id) {
@@ -320,6 +330,7 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
 
     suspend fun notifySubscribersOfNewPosts(feed: SyndFeed) {
         val users = getSubscribers()
+        val channels = getChannels()
         val posts = getAndCreateNewPosts(feed)
 
         if(isMuted()) {
@@ -333,8 +344,13 @@ class Feed(id: EntityID<Int>): IntEntity(id) {
             users.forEach { user ->
                 user.notifyOfPost(post, this)
             }
+            channels.forEach { channel ->
+                channel.notifyOfPost(post, this)
+            }
         }
     }
+
+    suspend fun getChannels(): Array<Channel> = transaction { ChannelSubscription.find { ChannelSubscriptions.feed eq id }.toList().map { it.channel } }.toTypedArray()
 
     enum class FeedType {
         SUBREDDIT,
@@ -359,4 +375,114 @@ class Post(id: EntityID<Int>): IntEntity(id) {
     var categories by Posts.categories
     var author by Posts.author
     var pictureUrl by Posts.pictureUrl
+}
+
+class Channel(id: EntityID<Int>): IntEntity(id) {
+    companion object: IntEntityClass<Channel>(Channels)
+
+    var channelId by Channels.channelId
+    var user by User referencedOn Channels.user
+    var markup by Channels.markup
+
+    /**
+     * Check whether a [user] can manage this channel
+     *
+     * @param user The user
+     *
+     * @return True if the user can manage this channel, false if not.
+     */
+    fun userIsAdmin(user: User): Boolean = transaction { this@Channel.user.chatId == user.chatId }
+
+    /**
+     * Send an HTML enabled message
+     *
+     * @param message The message to send
+     */
+    suspend fun sendHtmlMessage(message: String) {
+        Bot.execute(SendMessage(
+                channelId,
+                message
+        ).enableHtml(true))
+    }
+
+    /**
+     * Notify the channel of a post
+     *
+     * @param post The post to notify the channel of
+     */
+    suspend fun notifyOfPost(post: Post, feed: Feed, customMarkup: String? = this.markup) {
+        val markup = customMarkup ?:
+                """
+                <b>{title}</b>
+                Published at: {date}
+                In feed {feed}
+                <a href="{url}">View post</a>
+            """.trimIndent()
+
+        val text = markup
+                .replace("""\n""", "\n")
+                .replace("{title}", post.title)
+                .replace("{url}", post.url)
+                .replace("{date}", post.publishedDate.toDateTimeString())
+                .replace("{feed}", feed.getNiceResource())
+                .replace("{author}", post.author ?: "someone at ${feed.getNiceResource()}")
+                .replace("{categories}", (post.categories ?: "").split(";").joinToString { category ->
+                    "${if(!category.contains(" ")) "#" else ""}$category"
+                })
+
+        if(markup.contains("{pic}")) {
+            if(post.pictureUrl == null)
+                return
+
+            try {
+                Bot.sendPhoto(SendPhoto().setChatId(channelId).setPhoto(post.pictureUrl).setCaption(text.replace("{pic}", "")))
+            } catch (e: TelegramApiException) {
+                logger.info("Unable to send photo with url ${post.pictureUrl} in feed ${feed.getNiceResource()}")
+            }
+            return
+        }
+
+        try {
+            sendHtmlMessage(
+                    text
+            )
+        } catch (e: Exception) {
+            logger.error("Exception while trying to send a post!", e)
+        }
+    }
+
+    /**
+     * Subscribe a channel to a feed
+     *
+     * @param feed The feed to subscribe the channel to
+     */
+    suspend fun subscribe(feed: Feed) {
+        val subscription = transaction { ChannelSubscription.find { ChannelSubscriptions.feed.eq(feed.id) and ChannelSubscriptions.channel.eq(id) }.toList().firstOrNull() }
+
+        if(subscription != null)
+            return
+
+        // create new subscription
+        transaction {
+            ChannelSubscription.new {
+                this.feed = feed
+                this.channel = this@Channel
+            }
+        }
+    }
+
+    /**
+     * Get all subscriptions for this channel
+     *
+     * @return An array with all the feeds that this channel is subscribed to
+     */
+    suspend fun getSubscriptions(): Array<Feed> = transaction { ChannelSubscription.find { ChannelSubscriptions.channel eq id }.toList().map { it.feed }.toTypedArray() } // get the channels subscriptions then get the feeds for those subscriptions
+
+}
+
+class ChannelSubscription(id: EntityID<Int>): IntEntity(id) {
+    companion object: IntEntityClass<ChannelSubscription>(ChannelSubscriptions)
+
+    var channel by Channel referencedOn ChannelSubscriptions.channel
+    var feed by Feed referencedOn ChannelSubscriptions.feed
 }
